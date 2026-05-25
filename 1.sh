@@ -1029,16 +1029,24 @@ read_config() {
         TUIC_PSK=$(jq -r '.inbounds[] | select(.type=="tuic") | .users[0].password // empty' "$CONFIG_PATH" | head -n1)
     fi
     
-# 读取 Reality 公钥（Reality 和 AnyTLS 都会用到）
+# Reality 公共参数（Reality / AnyTLS 共用）
 if [ "${ENABLE_REALITY:-false}" = "true" ] || [ "${ENABLE_ANYTLS:-false}" = "true" ]; then
+    REALITY_SID=$(jq -r '
+        .inbounds[]
+        | select(.tls.reality.enabled == true)
+        | .tls.reality.short_id[0] // empty
+    ' "$CONFIG_PATH" | head -n1)
+
     [ -f /etc/sing-box/.reality_pub ] && REALITY_PUB=$(cat /etc/sing-box/.reality_pub)
 fi
 
+# VLESS Reality 专属参数
 if [ "${ENABLE_REALITY:-false}" = "true" ]; then
     REALITY_PORT=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port // empty' "$CONFIG_PATH" | head -n1)
+
     REALITY_UUID=$(jq -r '.inbounds[] | select(.type=="vless") | .users[0].uuid // empty' "$CONFIG_PATH" | head -n1)
+
     REALITY_PK=$(jq -r '.inbounds[] | select(.type=="vless") | .tls.reality.private_key // empty' "$CONFIG_PATH" | head -n1)
-    REALITY_SID=$(jq -r '.inbounds[] | select(.type=="vless") | .tls.reality.short_id[0] // empty' "$CONFIG_PATH" | head -n1)
 fi
 
 if [ "${ENABLE_ANYTLS:-false}" = "true" ]; then
