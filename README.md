@@ -1,6 +1,6 @@
 # Sing-box 多协议一键部署脚本
 
-一个强大的 Sing-box 自动化部署工具，支持SS/HY2/TUIC/VLESS Reality 协议自选部署和线路机 VLESS Reality 中转的完整解决方案。
+一个强大的 Sing-box 自动化部署工具，支持SS/HY2/TUIC/VLESS Reality/AnyTLS Reality 协议自选部署和线路机 VLESS Reality 中转的完整解决方案。
 
 ---
 
@@ -9,7 +9,7 @@
 ### 🎯 部署机功能
 
 - ✅ **一键安装** - 自动部署 Sing-box 最新服务端
-- ✅ **自动生成** - 自动生成 密钥和配置文件，VLESS Reality 自选或默认SNI
+- ✅ **自动生成** - 自动生成 密钥和配置文件，Reality 自选或默认SNI
 - ✅ **多系统支持** - 支持 Alpine, Debian, Ubuntu, CentOS, RHEL, Fedora 等操作系统
 - ✅ **开机自启** - 自动配置 Systemd / OpenRC 开机自启，崩溃自动拉起服务端
 - ✅ **连接 IP** - 自动获取公网 IP 或手动输入 连接IP/DDNS域名 并生成客户端链接
@@ -18,7 +18,7 @@
 ### 🔗 线路机功能
 
 - ✅ **一键生成** - 从落地机直接生成线路机安装脚本
-- ✅ **Reality 入站** - 自动部署 VLESS + TLS Reality 入站
+- ✅ **Reality 入站** - 自动部署 VLESS Reality 入站
 - ✅ **灵活端口** - 支持自动寻找空闲端口或手动指定
 - ✅ **流量转发** - 自动转发流量到落地机SS节点
 - ✅ **完整链接** - 生成可用的 VLESS Reality 客户端链接
