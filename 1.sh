@@ -635,6 +635,12 @@ INBOUND_ANYTLS
     "level": "info",
     "timestamp": true
   },
+  "ntp": {
+    "enabled": true,
+    "server": "time.apple.com",
+    "server_port": 123,
+    "interval": "30m"
+  },
   "inbounds": [
 CONFIG_HEAD
     
