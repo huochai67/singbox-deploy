@@ -1,6 +1,6 @@
 # Sing-box 多协议一键部署脚本
 
-一个强大的 Sing-box 自动化部署工具，支持SS/HY2/TUIC/VLESS Reality/AnyTLS Reality 协议自选部署和线路机 VLESS Reality 中转的完整解决方案。
+一个强大的 Sing-box 自动化部署工具，支持SS/HY2/TUIC/VLESS Reality/AnyTLS Reality/VMess WebSocket 协议自选部署和线路机 VLESS Reality 中转的完整解决方案。
 
 ---
 
@@ -80,6 +80,12 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/caigouzi121380/singbox-d
 bash install-singbox-yyds.sh --non-interactive --protocols ss,reality --ss-port 12345 --reality-port 443 --host example.com --reality-sni addons.mozilla.org
 ```
 
+无人值守安装 VMess+WS 并自定义 WebSocket Host：
+
+```bash
+bash install-singbox-yyds.sh --non-interactive --protocols vmess --vmess-port 8080 --vmess-path /ws --vmess-host cdn.example.com --host example.com
+```
+
 ## 📦 脚本说明
 
 - `install-singbox-yyds.sh`：唯一主入口，支持多协议部署、无人值守运行、`sb` 管理面板和线路机脚本生成。
@@ -92,7 +98,7 @@ bash install-singbox-yyds.sh --non-interactive --protocols ss,reality --ss-port 
 --help                         显示帮助
 --non-interactive              无人值守运行，不等待输入
 -y, --yes                      自动确认默认确认项
---protocols ss,hy2,tuic        协议列表，支持 ss/hy2/tuic/reality/anytls/all
+--protocols ss,hy2,tuic        协议列表，支持 ss/hy2/tuic/reality/anytls/vmess/all
 --node-name NAME               节点名称后缀
 --host HOST                    客户端连接 IP 或 DDNS 域名
 --reality-sni SNI              Reality SNI，默认 addons.mozilla.org
@@ -102,6 +108,9 @@ bash install-singbox-yyds.sh --non-interactive --protocols ss,reality --ss-port 
 --tuic-port PORT               TUIC 端口
 --reality-port PORT            VLESS Reality 端口
 --anytls-port PORT             AnyTLS Reality 端口
+--vmess-port PORT              VMess WebSocket 端口
+--vmess-path PATH              VMess WebSocket 路径，默认 /vmess
+--vmess-host HOST              VMess WebSocket Host，默认空
 --reinstall                    已安装 sing-box 时强制重装
 --skip-reinstall               已安装 sing-box 时跳过重装
 ```

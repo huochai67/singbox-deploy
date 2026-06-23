@@ -19,6 +19,9 @@ PORT_HY2_ARG=""
 PORT_TUIC_ARG=""
 PORT_REALITY_ARG=""
 PORT_ANYTLS_ARG=""
+PORT_VMESS_ARG=""
+VMESS_PATH_ARG=""
+VMESS_HOST_ARG=""
 REINSTALL_MODE="ask"
 
 usage() {
@@ -32,7 +35,7 @@ Sing-box 多协议一键部署脚本
   -h, --help                         显示帮助
       --non-interactive              无人值守运行，不等待输入
   -y, --yes                          自动确认默认确认项
-      --protocols LIST               协议: ss,hy2,tuic,reality,anytls,all
+      --protocols LIST               协议: ss,hy2,tuic,reality,anytls,vmess,all
       --node-name NAME               节点名称后缀
       --host HOST                    客户端连接 IP 或 DDNS 域名
       --reality-sni SNI              Reality SNI，默认 addons.mozilla.org
@@ -42,6 +45,9 @@ Sing-box 多协议一键部署脚本
       --tuic-port PORT               TUIC 端口
       --reality-port PORT            VLESS Reality 端口
       --anytls-port PORT             AnyTLS Reality 端口
+      --vmess-port PORT              VMess WebSocket 端口
+      --vmess-path PATH              VMess WebSocket 路径，默认 /vmess
+      --vmess-host HOST              VMess WebSocket Host，默认空
       --reinstall                    已安装 sing-box 时强制重装
       --skip-reinstall               已安装 sing-box 时跳过重装
 
@@ -83,6 +89,9 @@ parse_args() {
             --tuic-port) need_value "$@"; PORT_TUIC_ARG="$2"; shift ;;
             --reality-port) need_value "$@"; PORT_REALITY_ARG="$2"; shift ;;
             --anytls-port) need_value "$@"; PORT_ANYTLS_ARG="$2"; shift ;;
+            --vmess-port) need_value "$@"; PORT_VMESS_ARG="$2"; shift ;;
+            --vmess-path) need_value "$@"; VMESS_PATH_ARG="$2"; shift ;;
+            --vmess-host) need_value "$@"; VMESS_HOST_ARG="$2"; shift ;;
             --reinstall) REINSTALL_MODE="reinstall" ;;
             --skip-reinstall) REINSTALL_MODE="skip" ;;
             *) err "未知参数: $1"; usage; exit 1 ;;
@@ -95,6 +104,7 @@ parse_args() {
     [ -n "$PORT_TUIC_ARG" ] && validate_port "--tuic-port" "$PORT_TUIC_ARG"
     [ -n "$PORT_REALITY_ARG" ] && validate_port "--reality-port" "$PORT_REALITY_ARG"
     [ -n "$PORT_ANYTLS_ARG" ] && validate_port "--anytls-port" "$PORT_ANYTLS_ARG"
+    [ -n "$PORT_VMESS_ARG" ] && validate_port "--vmess-port" "$PORT_VMESS_ARG"
 
     if [ -n "$SS_METHOD_ARG" ] && [ "$SS_METHOD_ARG" != "2022-blake3-aes-128-gcm" ] && [ "$SS_METHOD_ARG" != "aes-128-gcm" ]; then
         err "--ss-method 仅支持 2022-blake3-aes-128-gcm 或 aes-128-gcm"
@@ -238,6 +248,7 @@ select_protocols() {
         echo "3) TUIC"
         echo "4) VLESS Reality"
         echo "5) AnyTLS Reality"
+        echo "6) VMess WebSocket"
         echo ""
         echo "请输入要部署的协议编号(多个用空格分隔,如: 1 2 4):"
         read -r protocol_input
@@ -249,6 +260,7 @@ select_protocols() {
     ENABLE_TUIC=false
     ENABLE_REALITY=false
     ENABLE_ANYTLS=false
+    ENABLE_VMESS=false
     
     protocol_input="$(printf "%s" "$protocol_input" | tr ',' ' ')"
     for num in $protocol_input; do
@@ -258,12 +270,13 @@ select_protocols() {
             3|tuic) ENABLE_TUIC=true ;;
             4|reality|vless|vless-reality) ENABLE_REALITY=true ;;
             5|anytls|anytls-reality) ENABLE_ANYTLS=true ;;
-            all) ENABLE_SS=true; ENABLE_HY2=true; ENABLE_TUIC=true; ENABLE_REALITY=true; ENABLE_ANYTLS=true ;;
+            6|vmess|vmess-ws|vmess+ws) ENABLE_VMESS=true ;;
+            all) ENABLE_SS=true; ENABLE_HY2=true; ENABLE_TUIC=true; ENABLE_REALITY=true; ENABLE_ANYTLS=true; ENABLE_VMESS=true ;;
             *) warn "无效选项: $num" ;;
         esac
     done
     
-    if ! $ENABLE_SS && ! $ENABLE_HY2 && ! $ENABLE_TUIC && ! $ENABLE_REALITY && ! $ENABLE_ANYTLS; then
+    if ! $ENABLE_SS && ! $ENABLE_HY2 && ! $ENABLE_TUIC && ! $ENABLE_REALITY && ! $ENABLE_ANYTLS && ! $ENABLE_VMESS; then
         err "未选择任何协议,退出安装"
         exit 1
     fi
@@ -276,6 +289,7 @@ ENABLE_HY2=$ENABLE_HY2
 ENABLE_TUIC=$ENABLE_TUIC
 ENABLE_REALITY=$ENABLE_REALITY
 ENABLE_ANYTLS=$ENABLE_ANYTLS
+ENABLE_VMESS=$ENABLE_VMESS
 EOF
     
     info "已选择协议:"
@@ -284,6 +298,7 @@ EOF
     $ENABLE_TUIC && echo "  - TUIC"
     $ENABLE_REALITY && echo "  - VLESS Reality"
     $ENABLE_ANYTLS && echo "  - AnyTLS Reality"
+    $ENABLE_VMESS && echo "  - VMess WebSocket"
     
     # 导出为全局变量（确保后续脚本可以访问）
     export ENABLE_SS
@@ -291,6 +306,7 @@ EOF
     export ENABLE_TUIC
     export ENABLE_REALITY
     export ENABLE_ANYTLS
+    export ENABLE_VMESS
 }
 
 # 创建配置目录
@@ -501,6 +517,32 @@ get_config() {
     info "AnyTLS Reality 端口: $PORT_ANYTLS"
     info "AnyTLS Reality 用户名: $ANYTLS_USER"
     info "AnyTLS Reality 密码已自动生成"
+    fi
+
+    if $ENABLE_VMESS; then
+        info "=== 配置 VMess WebSocket ==="
+        if [ -n "$PORT_VMESS_ARG" ]; then
+            PORT_VMESS="$PORT_VMESS_ARG"
+        elif [ -n "${SINGBOX_PORT_VMESS:-}" ]; then
+            PORT_VMESS="$SINGBOX_PORT_VMESS"
+        elif $NON_INTERACTIVE; then
+            PORT_VMESS="$(rand_port)"
+        else
+            read -p "请输入 VMess WebSocket 端口(留空则随机 10000-60000): " USER_PORT_VMESS
+            PORT_VMESS="${USER_PORT_VMESS:-$(rand_port)}"
+        fi
+        validate_port "VMess WebSocket 端口" "$PORT_VMESS"
+
+        VMESS_PATH="${VMESS_PATH_ARG:-/vmess}"
+        [ -z "$VMESS_PATH" ] && VMESS_PATH="/vmess"
+        [[ "$VMESS_PATH" != /* ]] && VMESS_PATH="/$VMESS_PATH"
+        VMESS_HOST="${VMESS_HOST_ARG:-}"
+        UUID_VMESS=$(rand_uuid)
+
+        info "VMess WebSocket 端口: $PORT_VMESS"
+        info "VMess WebSocket 路径: $VMESS_PATH"
+        [ -n "$VMESS_HOST" ] && info "VMess WebSocket Host: $VMESS_HOST"
+        info "VMess UUID 已自动生成"
     fi
 
     info "配置完成，继续安装..."
@@ -809,6 +851,57 @@ INBOUND_ANYTLS
     need_comma=true
     fi
 
+    if $ENABLE_VMESS; then
+        $need_comma && echo "," >> "$TEMP_INBOUNDS"
+        if [ -n "$VMESS_HOST" ]; then
+            cat >> "$TEMP_INBOUNDS" <<'INBOUND_VMESS_HOST'
+    {
+      "type": "vmess",
+      "tag": "vmess-ws-in",
+      "listen": "::",
+      "listen_port": PORT_VMESS_PLACEHOLDER,
+      "users": [
+        {
+          "uuid": "UUID_VMESS_PLACEHOLDER",
+          "alterId": 0
+        }
+      ],
+      "transport": {
+        "type": "ws",
+        "path": "VMESS_PATH_PLACEHOLDER",
+        "headers": {
+          "Host": "VMESS_HOST_PLACEHOLDER"
+        }
+      }
+    }
+INBOUND_VMESS_HOST
+            sed -i "s|VMESS_HOST_PLACEHOLDER|$VMESS_HOST|g" "$TEMP_INBOUNDS"
+        else
+            cat >> "$TEMP_INBOUNDS" <<'INBOUND_VMESS'
+    {
+      "type": "vmess",
+      "tag": "vmess-ws-in",
+      "listen": "::",
+      "listen_port": PORT_VMESS_PLACEHOLDER,
+      "users": [
+        {
+          "uuid": "UUID_VMESS_PLACEHOLDER",
+          "alterId": 0
+        }
+      ],
+      "transport": {
+        "type": "ws",
+        "path": "VMESS_PATH_PLACEHOLDER"
+      }
+    }
+INBOUND_VMESS
+        fi
+        sed -i "s|PORT_VMESS_PLACEHOLDER|$PORT_VMESS|g" "$TEMP_INBOUNDS"
+        sed -i "s|UUID_VMESS_PLACEHOLDER|$UUID_VMESS|g" "$TEMP_INBOUNDS"
+        sed -i "s|VMESS_PATH_PLACEHOLDER|$VMESS_PATH|g" "$TEMP_INBOUNDS"
+        need_comma=true
+    fi
+
     # 生成最终配置
     cat > "$CONFIG_PATH" <<'CONFIG_HEAD'
 {
@@ -851,6 +944,7 @@ ENABLE_HY2=$ENABLE_HY2
 ENABLE_TUIC=$ENABLE_TUIC
 ENABLE_REALITY=$ENABLE_REALITY
 ENABLE_ANYTLS=$ENABLE_ANYTLS
+ENABLE_VMESS=$ENABLE_VMESS
 CACHEEOF
 
     $ENABLE_SS && cat >> /etc/sing-box/.config_cache <<CACHEEOF
@@ -883,6 +977,13 @@ CACHEEOF
 ANYTLS_PORT=$PORT_ANYTLS
 ANYTLS_USER=$ANYTLS_USER
 ANYTLS_PSK=$ANYTLS_PSK
+CACHEEOF
+
+    $ENABLE_VMESS && cat >> /etc/sing-box/.config_cache <<CACHEEOF
+VMESS_PORT=$PORT_VMESS
+VMESS_UUID=$UUID_VMESS
+VMESS_PATH=$VMESS_PATH
+VMESS_HOST=$VMESS_HOST
 CACHEEOF
 
     # 全局写入 CUSTOM_IP（哪怕为空也写）
@@ -1067,6 +1168,21 @@ generate_uris() {
         echo "anytls://${anytls_pass_encoded}@${host}:${PORT_ANYTLS}/?security=reality&sni=${REALITY_SNI}&fp=chrome&pbk=${REALITY_PUB}&sid=${REALITY_SID}#anytls${suffix}"
         echo ""
     fi
+
+    if $ENABLE_VMESS; then
+        vmess_json=$(jq -nc \
+            --arg ps "vmess-ws${suffix}" \
+            --arg add "$host" \
+            --arg port "$PORT_VMESS" \
+            --arg id "$UUID_VMESS" \
+            --arg host_header "$VMESS_HOST" \
+            --arg path "$VMESS_PATH" \
+            '{v:"2",ps:$ps,add:$add,port:$port,id:$id,aid:"0",scy:"auto",net:"ws",type:"none",host:$host_header,path:$path,tls:""}')
+        vmess_b64=$(printf "%s" "$vmess_json" | base64 -w0 2>/dev/null || printf "%s" "$vmess_json" | base64 | tr -d '\n')
+        echo "=== VMess WebSocket ==="
+        echo "vmess://${vmess_b64}"
+        echo ""
+    fi
 }
 
 # -----------------------
@@ -1082,6 +1198,7 @@ $ENABLE_HY2 && echo "   HY2 端口: $PORT_HY2 | 密码: $PSK_HY2"
 $ENABLE_TUIC && echo "   TUIC 端口: $PORT_TUIC | UUID: $UUID_TUIC | 密码: $PSK_TUIC"
 $ENABLE_REALITY && echo "   Reality 端口: $PORT_REALITY | UUID: $UUID"
 $ENABLE_ANYTLS && echo "   AnyTLS 端口: $PORT_ANYTLS | 用户: $ANYTLS_USER | 密码: $ANYTLS_PSK"
+$ENABLE_VMESS && echo "   VMess WebSocket 端口: $PORT_VMESS | UUID: $UUID_VMESS | 路径: $VMESS_PATH | Host: ${VMESS_HOST:-空}"
 echo "   服务器: $PUB_IP"
 echo "   Reality server_name(SNI): ${REALITY_SNI:-addons.mozilla.org}"
 echo ""
@@ -1198,6 +1315,7 @@ read_config() {
     # 确保有默认值
     REALITY_SNI="${REALITY_SNI:-addons.mozilla.org}"
     ENABLE_ANYTLS="${ENABLE_ANYTLS:-false}"
+    ENABLE_VMESS="${ENABLE_VMESS:-false}"
     CUSTOM_IP="${CUSTOM_IP:-}"
 
     # 读取各协议配置
@@ -1242,6 +1360,13 @@ if [ "${ENABLE_ANYTLS:-false}" = "true" ]; then
     ANYTLS_PORT=$(jq -r '.inbounds[] | select(.type=="anytls") | .listen_port // empty' "$CONFIG_PATH" | head -n1)
     ANYTLS_USER=$(jq -r '.inbounds[] | select(.type=="anytls") | .users[0].name // empty' "$CONFIG_PATH" | head -n1)
     ANYTLS_PSK=$(jq -r '.inbounds[] | select(.type=="anytls") | .users[0].password // empty' "$CONFIG_PATH" | head -n1)
+fi
+
+if [ "${ENABLE_VMESS:-false}" = "true" ]; then
+    VMESS_PORT=$(jq -r '.inbounds[] | select(.type=="vmess") | .listen_port // empty' "$CONFIG_PATH" | head -n1)
+    VMESS_UUID=$(jq -r '.inbounds[] | select(.type=="vmess") | .users[0].uuid // empty' "$CONFIG_PATH" | head -n1)
+    VMESS_PATH=$(jq -r '.inbounds[] | select(.type=="vmess") | .transport.path // "/vmess"' "$CONFIG_PATH" | head -n1)
+    VMESS_HOST=$(jq -r '.inbounds[] | select(.type=="vmess") | .transport.headers.Host // empty' "$CONFIG_PATH" | head -n1)
 fi
 }
 
@@ -1308,6 +1433,21 @@ generate_uris() {
         anytls_pass_encoded=$(url_encode "$ANYTLS_PSK")
         echo "=== AnyTLS Reality ===" >> "$URI_FILE"
         echo "anytls://${anytls_pass_encoded}@${PUBLIC_IP}:${ANYTLS_PORT}/?security=reality&sni=${REALITY_SNI}&fp=chrome&pbk=${REALITY_PUB}&sid=${REALITY_SID}#anytls${node_suffix}" >> "$URI_FILE"
+        echo "" >> "$URI_FILE"
+    fi
+
+    if [ "${ENABLE_VMESS:-false}" = "true" ]; then
+        vmess_json=$(jq -nc \
+            --arg ps "vmess-ws${node_suffix}" \
+            --arg add "$PUBLIC_IP" \
+            --arg port "$VMESS_PORT" \
+            --arg id "$VMESS_UUID" \
+            --arg host_header "${VMESS_HOST:-}" \
+            --arg path "${VMESS_PATH:-/vmess}" \
+            '{v:"2",ps:$ps,add:$add,port:$port,id:$id,aid:"0",scy:"auto",net:"ws",type:"none",host:$host_header,path:$path,tls:""}')
+        vmess_b64=$(printf "%s" "$vmess_json" | base64 -w0 2>/dev/null || printf "%s" "$vmess_json" | base64 | tr -d '\n')
+        echo "=== VMess WebSocket ===" >> "$URI_FILE"
+        echo "vmess://${vmess_b64}" >> "$URI_FILE"
         echo "" >> "$URI_FILE"
     fi
 
@@ -1477,6 +1617,33 @@ action_reset_anytls() {
     ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
 
     info "已启动服务并更新 AnyTLS Reality 端口: $new_port"
+    service_start || warn "启动服务失败"
+    sleep 1
+    generate_uris || warn "生成 URI 失败"
+}
+
+# 重置VMess WebSocket端口
+action_reset_vmess() {
+    read_config || return 1
+
+    if [ "${ENABLE_VMESS:-false}" != "true" ]; then
+        err "VMess WebSocket 协议未启用"
+        return 1
+    fi
+
+    read -p "输入新的 VMess WebSocket 端口(回车保持 $VMESS_PORT): " new_port
+    new_port="${new_port:-$VMESS_PORT}"
+
+    info "正在停止服务..."
+    service_stop || warn "停止服务失败"
+
+    cp "$CONFIG_PATH" "${CONFIG_PATH}.bak"
+
+    jq --argjson port "$new_port" '
+    .inbounds |= map(if .type=="vmess" then .listen_port = $port else . end)
+    ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
+
+    info "已启动服务并更新 VMess WebSocket 端口: $new_port"
     service_start || warn "启动服务失败"
     sleep 1
     generate_uris || warn "生成 URI 失败"
@@ -1848,6 +2015,12 @@ MENU
         option=$((option + 1))
     fi
 
+    if [ "${ENABLE_VMESS:-false}" = "true" ]; then
+        echo "$option) 重置 VMess WebSocket 端口"
+        MENU_MAP[$option]="reset_vmess"
+        option=$((option + 1))
+    fi
+
     # 固定功能选项
     MENU_MAP[$option]="start"
     echo "$option) 启动服务"
@@ -1906,6 +2079,7 @@ while true; do
                 reset_tuic) action_reset_tuic ;;
                 reset_reality) action_reset_reality ;;
                 reset_anytls) action_reset_anytls ;;
+                reset_vmess) action_reset_vmess ;;
                 start) service_start && info "已启动" ;;
                 stop) service_stop && info "已停止" ;;
                 restart) service_restart && info "已重启" ;;
