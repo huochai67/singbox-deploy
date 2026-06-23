@@ -65,3 +65,66 @@
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/caigouzi121380/singbox-deploy/main/install-singbox-yyds.sh)"
+```
+
+## 📦 脚本说明
+
+- `install-singbox-yyds.sh`：主入口，支持多协议部署、`sb` 管理面板和线路机脚本生成。
+- `install-singbox.sh`：基础版，仅用于简单 Shadowsocks 部署场景。
+
+## 🔧 安装后管理
+
+安装完成后会创建 `sb` 快捷管理命令，可用于：
+
+- 查看协议链接
+- 查看或编辑配置文件
+- 重置各协议端口
+- 启动、停止、重启和查看服务状态
+- 更新 sing-box
+- 生成线路机安装脚本
+- 卸载 sing-box
+
+常用服务命令：
+
+```bash
+sb
+systemctl status sing-box
+journalctl -u sing-box -f
+```
+
+Alpine/OpenRC 系统使用：
+
+```bash
+sb
+rc-service sing-box status
+tail -f /var/log/sing-box.log
+```
+
+## 🧪 Docker Alpine 验证
+
+语法检查：
+
+```bash
+docker run --rm -v "$PWD:/work:ro" -w /work alpine:latest sh -c 'apk add --no-cache bash >/dev/null && bash -n install-singbox-yyds.sh && bash -n install-singbox.sh'
+```
+
+在 Alpine 容器中实际跑一次最小 SS 部署：
+
+```bash
+docker run --rm -i -v "$PWD:/work:ro" -w /work alpine:latest sh -c 'mkdir -p /run/openrc && touch /run/openrc/softlevel && apk add --no-cache bash >/dev/null && printf "\n1\n\n\n\n" | bash install-singbox-yyds.sh'
+```
+
+验证安装产物和 `sb` 面板：
+
+```bash
+docker run --rm -i -v "$PWD:/work:ro" -w /work alpine:latest sh -c 'mkdir -p /run/openrc && touch /run/openrc/softlevel && apk add --no-cache bash >/dev/null && printf "\n1\n\n\n\n" | bash install-singbox-yyds.sh >/tmp/install.log && sing-box check -c /etc/sing-box/config.json && test -x /usr/local/bin/sb && printf "1\n0\n" | sb'
+```
+
+说明：Docker 容器不是完整 init 环境，OpenRC 可能输出 `hwdrivers`、`machine-id` 或 cgroup 相关警告；只要脚本最终提示部署完成、`sing-box check` 通过、`sb` 可生成链接，即表示容器验证通过。
+
+## ⚠️ 注意事项
+
+- 脚本需要 root 权限运行。
+- 脚本会写入 `/etc/sing-box`、系统服务文件和 `/usr/local/bin/sb`。
+- 请确保服务器防火墙或安全组已放行所选协议端口。
+- 线路机脚本依赖落地机已部署 SS 协议作为出口。
