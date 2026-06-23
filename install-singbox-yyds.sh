@@ -7,6 +7,103 @@ info() { echo -e "\033[1;34m[INFO]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[WARN]\033[0m $*"; }
 err()  { echo -e "\033[1;31m[ERR]\033[0m $*" >&2; }
 
+NON_INTERACTIVE=false
+ASSUME_YES=false
+PROTOCOLS_ARG=""
+NODE_NAME_ARG=""
+HOST_ARG=""
+REALITY_SNI_ARG=""
+SS_METHOD_ARG=""
+PORT_SS_ARG=""
+PORT_HY2_ARG=""
+PORT_TUIC_ARG=""
+PORT_REALITY_ARG=""
+PORT_ANYTLS_ARG=""
+REINSTALL_MODE="ask"
+
+usage() {
+    cat <<'EOF'
+Sing-box 多协议一键部署脚本
+
+用法:
+  bash install-singbox-yyds.sh [选项]
+
+常用选项:
+  -h, --help                         显示帮助
+      --non-interactive              无人值守运行，不等待输入
+  -y, --yes                          自动确认默认确认项
+      --protocols LIST               协议: ss,hy2,tuic,reality,anytls,all
+      --node-name NAME               节点名称后缀
+      --host HOST                    客户端连接 IP 或 DDNS 域名
+      --reality-sni SNI              Reality SNI，默认 addons.mozilla.org
+      --ss-method METHOD             SS 加密: 2022-blake3-aes-128-gcm 或 aes-128-gcm
+      --ss-port PORT                 SS 端口
+      --hy2-port PORT                HY2 端口
+      --tuic-port PORT               TUIC 端口
+      --reality-port PORT            VLESS Reality 端口
+      --anytls-port PORT             AnyTLS Reality 端口
+      --reinstall                    已安装 sing-box 时强制重装
+      --skip-reinstall               已安装 sing-box 时跳过重装
+
+示例:
+  bash install-singbox-yyds.sh --non-interactive --protocols ss
+  bash install-singbox-yyds.sh --non-interactive --protocols ss,reality --ss-port 12345 --host example.com
+EOF
+}
+
+need_value() {
+    if [ "$#" -lt 2 ] || [[ "$2" == --* ]]; then
+        err "$1 需要参数值"
+        exit 1
+    fi
+}
+
+validate_port() {
+    local name="$1"
+    local port="$2"
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        err "$name 必须为 1-65535 的数字"
+        exit 1
+    fi
+}
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            --non-interactive) NON_INTERACTIVE=true ;;
+            -y|--yes) ASSUME_YES=true ;;
+            --protocols) need_value "$@"; PROTOCOLS_ARG="$2"; shift ;;
+            --node-name) need_value "$@"; NODE_NAME_ARG="$2"; shift ;;
+            --host) need_value "$@"; HOST_ARG="$2"; shift ;;
+            --reality-sni) need_value "$@"; REALITY_SNI_ARG="$2"; shift ;;
+            --ss-method) need_value "$@"; SS_METHOD_ARG="$2"; shift ;;
+            --ss-port) need_value "$@"; PORT_SS_ARG="$2"; shift ;;
+            --hy2-port) need_value "$@"; PORT_HY2_ARG="$2"; shift ;;
+            --tuic-port) need_value "$@"; PORT_TUIC_ARG="$2"; shift ;;
+            --reality-port) need_value "$@"; PORT_REALITY_ARG="$2"; shift ;;
+            --anytls-port) need_value "$@"; PORT_ANYTLS_ARG="$2"; shift ;;
+            --reinstall) REINSTALL_MODE="reinstall" ;;
+            --skip-reinstall) REINSTALL_MODE="skip" ;;
+            *) err "未知参数: $1"; usage; exit 1 ;;
+        esac
+        shift
+    done
+
+    [ -n "$PORT_SS_ARG" ] && validate_port "--ss-port" "$PORT_SS_ARG"
+    [ -n "$PORT_HY2_ARG" ] && validate_port "--hy2-port" "$PORT_HY2_ARG"
+    [ -n "$PORT_TUIC_ARG" ] && validate_port "--tuic-port" "$PORT_TUIC_ARG"
+    [ -n "$PORT_REALITY_ARG" ] && validate_port "--reality-port" "$PORT_REALITY_ARG"
+    [ -n "$PORT_ANYTLS_ARG" ] && validate_port "--anytls-port" "$PORT_ANYTLS_ARG"
+
+    if [ -n "$SS_METHOD_ARG" ] && [ "$SS_METHOD_ARG" != "2022-blake3-aes-128-gcm" ] && [ "$SS_METHOD_ARG" != "aes-128-gcm" ]; then
+        err "--ss-method 仅支持 2022-blake3-aes-128-gcm 或 aes-128-gcm"
+        exit 1
+    fi
+}
+
+parse_args "$@"
+
 # -----------------------
 # 检测系统类型
 detect_os() {
@@ -111,8 +208,14 @@ rand_uuid() {
 
 # -----------------------
 # 配置节点名称后缀
-echo "请输入节点名称(留空则默认议名):"
-read -r user_name
+if [ -n "$NODE_NAME_ARG" ]; then
+    user_name="$NODE_NAME_ARG"
+elif $NON_INTERACTIVE; then
+    user_name=""
+else
+    echo "请输入节点名称(留空则默认议名):"
+    read -r user_name
+fi
 if [[ -n "$user_name" ]]; then
     suffix="-${user_name}"
     echo "$suffix" > /root/node_names.txt
@@ -124,14 +227,21 @@ fi
 # 选择要部署的协议
 select_protocols() {
     info "=== 选择要部署的协议 ==="
-    echo "1) Shadowsocks (SS)"
-    echo "2) Hysteria2 (HY2)"
-    echo "3) TUIC"
-    echo "4) VLESS Reality"
-    echo "5) AnyTLS Reality"
-    echo ""
-    echo "请输入要部署的协议编号(多个用空格分隔,如: 1 2 4):"
-    read -r protocol_input
+    if [ -n "$PROTOCOLS_ARG" ]; then
+        protocol_input="$PROTOCOLS_ARG"
+    elif $NON_INTERACTIVE; then
+        protocol_input="ss"
+        info "无人值守模式未指定协议，默认部署 Shadowsocks (SS)"
+    else
+        echo "1) Shadowsocks (SS)"
+        echo "2) Hysteria2 (HY2)"
+        echo "3) TUIC"
+        echo "4) VLESS Reality"
+        echo "5) AnyTLS Reality"
+        echo ""
+        echo "请输入要部署的协议编号(多个用空格分隔,如: 1 2 4):"
+        read -r protocol_input
+    fi
     
     # 使用全局变量
     ENABLE_SS=false
@@ -140,13 +250,15 @@ select_protocols() {
     ENABLE_REALITY=false
     ENABLE_ANYTLS=false
     
+    protocol_input="$(printf "%s" "$protocol_input" | tr ',' ' ')"
     for num in $protocol_input; do
-        case "$num" in
-            1) ENABLE_SS=true ;;
-            2) ENABLE_HY2=true ;;
-            3) ENABLE_TUIC=true ;;
-            4) ENABLE_REALITY=true ;;
-            5) ENABLE_ANYTLS=true ;;
+        case "$(printf "%s" "$num" | tr '[:upper:]' '[:lower:]')" in
+            1|ss|shadowsocks) ENABLE_SS=true ;;
+            2|hy2|hysteria2) ENABLE_HY2=true ;;
+            3|tuic) ENABLE_TUIC=true ;;
+            4|reality|vless|vless-reality) ENABLE_REALITY=true ;;
+            5|anytls|anytls-reality) ENABLE_ANYTLS=true ;;
+            all) ENABLE_SS=true; ENABLE_HY2=true; ENABLE_TUIC=true; ENABLE_REALITY=true; ENABLE_ANYTLS=true ;;
             *) warn "无效选项: $num" ;;
         esac
     done
@@ -192,6 +304,20 @@ select_ss_method() {
         SS_METHOD="2022-blake3-aes-128-gcm"
         return 0
     fi
+
+    if [ -n "$SS_METHOD_ARG" ]; then
+        SS_METHOD="$SS_METHOD_ARG"
+        info "已选择加密方式: $SS_METHOD"
+        export SS_METHOD
+        return 0
+    fi
+
+    if $NON_INTERACTIVE; then
+        SS_METHOD="2022-blake3-aes-128-gcm"
+        info "无人值守模式使用默认加密方式: $SS_METHOD"
+        export SS_METHOD
+        return 0
+    fi
     
     info "=== 选择 Shadowsocks 加密方式 ==="
     echo "1) 2022-blake3-aes-128-gcm (推荐)"
@@ -218,16 +344,28 @@ select_ss_method
 # -----------------------
 # 在获取公网 IP 之前，询问连接ip和sni配置
 echo ""
-echo "请输入节点连接 IP 或 DDNS域名(留空默认出口IP):"
-read -r CUSTOM_IP
+if [ -n "$HOST_ARG" ]; then
+    CUSTOM_IP="$HOST_ARG"
+elif $NON_INTERACTIVE; then
+    CUSTOM_IP=""
+else
+    echo "请输入节点连接 IP 或 DDNS域名(留空默认出口IP):"
+    read -r CUSTOM_IP
+fi
 CUSTOM_IP="$(echo "$CUSTOM_IP" | tr -d '[:space:]')"
 
 # 如果用户选择了 Reality 协议，询问 server_name(SNI)
 REALITY_SNI=""
 if $ENABLE_REALITY || $ENABLE_ANYTLS; then
-    echo ""
-    echo "请输入 Reality 的 SNI(留空默认 addons.mozilla.org):"
-    read -r REALITY_SNI
+    if [ -n "$REALITY_SNI_ARG" ]; then
+        REALITY_SNI="$REALITY_SNI_ARG"
+    elif $NON_INTERACTIVE; then
+        REALITY_SNI="addons.mozilla.org"
+    else
+        echo ""
+        echo "请输入 Reality 的 SNI(留空默认 addons.mozilla.org):"
+        read -r REALITY_SNI
+    fi
     REALITY_SNI="$(echo "${REALITY_SNI:-addons.mozilla.org}" | tr -d '[:space:]')"
 else
     # 也设默认，方便后续统一处理（若未选 reality，也写入缓存以便 sb 读取）
@@ -271,12 +409,17 @@ get_config() {
     
     if $ENABLE_SS; then
         info "=== 配置 Shadowsocks (SS) ==="
-        if [ -n "${SINGBOX_PORT_SS:-}" ]; then
+        if [ -n "$PORT_SS_ARG" ]; then
+            PORT_SS="$PORT_SS_ARG"
+        elif [ -n "${SINGBOX_PORT_SS:-}" ]; then
             PORT_SS="$SINGBOX_PORT_SS"
+        elif $NON_INTERACTIVE; then
+            PORT_SS="$(rand_port)"
         else
             read -p "请输入 SS 端口(留空则随机 10000-60000): " USER_PORT_SS
             PORT_SS="${USER_PORT_SS:-$(rand_port)}"
         fi
+        validate_port "SS 端口" "$PORT_SS"
         PSK_SS=$(rand_pass)
         info "SS 端口: $PORT_SS"
         info "SS 加密方式: $SS_METHOD"
@@ -285,12 +428,17 @@ get_config() {
 
     if $ENABLE_HY2; then
         info "=== 配置 Hysteria2 (HY2) ==="
-        if [ -n "${SINGBOX_PORT_HY2:-}" ]; then
+        if [ -n "$PORT_HY2_ARG" ]; then
+            PORT_HY2="$PORT_HY2_ARG"
+        elif [ -n "${SINGBOX_PORT_HY2:-}" ]; then
             PORT_HY2="$SINGBOX_PORT_HY2"
+        elif $NON_INTERACTIVE; then
+            PORT_HY2="$(rand_port)"
         else
             read -p "请输入 HY2 端口(留空则随机 10000-60000): " USER_PORT_HY2
             PORT_HY2="${USER_PORT_HY2:-$(rand_port)}"
         fi
+        validate_port "HY2 端口" "$PORT_HY2"
         PSK_HY2=$(rand_pass)
         info "HY2 端口: $PORT_HY2"
         info "HY2 密码已自动生成"
@@ -298,12 +446,17 @@ get_config() {
 
     if $ENABLE_TUIC; then
         info "=== 配置 TUIC ==="
-        if [ -n "${SINGBOX_PORT_TUIC:-}" ]; then
+        if [ -n "$PORT_TUIC_ARG" ]; then
+            PORT_TUIC="$PORT_TUIC_ARG"
+        elif [ -n "${SINGBOX_PORT_TUIC:-}" ]; then
             PORT_TUIC="$SINGBOX_PORT_TUIC"
+        elif $NON_INTERACTIVE; then
+            PORT_TUIC="$(rand_port)"
         else
             read -p "请输入 TUIC 端口(留空则随机 10000-60000): " USER_PORT_TUIC
             PORT_TUIC="${USER_PORT_TUIC:-$(rand_port)}"
         fi
+        validate_port "TUIC 端口" "$PORT_TUIC"
         PSK_TUIC=$(rand_pass)
         UUID_TUIC=$(rand_uuid)
         info "TUIC 端口: $PORT_TUIC"
@@ -312,12 +465,17 @@ get_config() {
 
     if $ENABLE_REALITY; then
         info "=== 配置 VLESS Reality ==="
-        if [ -n "${SINGBOX_PORT_REALITY:-}" ]; then
+        if [ -n "$PORT_REALITY_ARG" ]; then
+            PORT_REALITY="$PORT_REALITY_ARG"
+        elif [ -n "${SINGBOX_PORT_REALITY:-}" ]; then
             PORT_REALITY="$SINGBOX_PORT_REALITY"
+        elif $NON_INTERACTIVE; then
+            PORT_REALITY="$(rand_port)"
         else
             read -p "请输入 VLESS Reality 端口(留空则随机 10000-60000): " USER_PORT_REALITY
             PORT_REALITY="${USER_PORT_REALITY:-$(rand_port)}"
         fi
+        validate_port "VLESS Reality 端口" "$PORT_REALITY"
         UUID=$(rand_uuid)
         info "VLESS Reality 端口: $PORT_REALITY"
         info "VLESS Reality UUID 已自动生成"
@@ -325,12 +483,17 @@ get_config() {
     
     if $ENABLE_ANYTLS; then
     info "=== 配置 AnyTLS Reality ==="
-    if [ -n "${SINGBOX_PORT_ANYTLS:-}" ]; then
+    if [ -n "$PORT_ANYTLS_ARG" ]; then
+        PORT_ANYTLS="$PORT_ANYTLS_ARG"
+    elif [ -n "${SINGBOX_PORT_ANYTLS:-}" ]; then
         PORT_ANYTLS="$SINGBOX_PORT_ANYTLS"
+    elif $NON_INTERACTIVE; then
+        PORT_ANYTLS="$(rand_port)"
     else
         read -p "请输入 AnyTLS Reality 端口(留空则随机 10000-60000): " USER_PORT_ANYTLS
         PORT_ANYTLS="${USER_PORT_ANYTLS:-$(rand_port)}"
     fi
+    validate_port "AnyTLS Reality 端口" "$PORT_ANYTLS"
 
     ANYTLS_USER=$(openssl rand -hex 4)
     ANYTLS_PSK=$(openssl rand -base64 16)
@@ -353,11 +516,29 @@ install_singbox() {
     if command -v sing-box >/dev/null 2>&1; then
         CURRENT_VERSION=$(sing-box version 2>/dev/null | head -1 || echo "unknown")
         warn "检测到已安装 sing-box: $CURRENT_VERSION"
-        read -p "是否重新安装?(y/N): " REINSTALL
-        if [[ ! "$REINSTALL" =~ ^[Yy]$ ]]; then
-            info "跳过 sing-box 安装"
-            return 0
-        fi
+        case "$REINSTALL_MODE" in
+            reinstall)
+                info "按参数要求重新安装 sing-box"
+                ;;
+            skip)
+                info "按参数要求跳过 sing-box 安装"
+                return 0
+                ;;
+            *)
+                if $ASSUME_YES; then
+                    info "按 --yes 确认重新安装 sing-box"
+                elif $NON_INTERACTIVE; then
+                    info "无人值守模式默认跳过 sing-box 重装"
+                    return 0
+                else
+                    read -p "是否重新安装?(y/N): " REINSTALL
+                    if [[ ! "$REINSTALL" =~ ^[Yy]$ ]]; then
+                        info "跳过 sing-box 安装"
+                        return 0
+                    fi
+                fi
+                ;;
+        esac
     fi
 
     case "$OS" in
@@ -1424,6 +1605,44 @@ set -euo pipefail
 info() { echo -e "\033[1;34m[INFO]\033[0m $*"; }
 err()  { echo -e "\033[1;31m[ERR]\033[0m $*" >&2; }
 
+NON_INTERACTIVE=false
+LISTEN_PORT_ARG=""
+
+usage() {
+    cat <<'EOF'
+用法: bash relay-install.sh [选项]
+
+选项:
+  -h, --help             显示帮助
+      --non-interactive  无人值守运行
+      --listen-port PORT 线路机监听端口
+EOF
+}
+
+validate_port() {
+    local port="$1"
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        err "监听端口必须为 1-65535 的数字"
+        exit 1
+    fi
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        --non-interactive) NON_INTERACTIVE=true ;;
+        --listen-port)
+            [ "$#" -lt 2 ] && err "--listen-port 需要参数值" && exit 1
+            LISTEN_PORT_ARG="$2"
+            shift
+            ;;
+        *) err "未知参数: $1"; usage; exit 1 ;;
+    esac
+    shift
+done
+
+[ -n "$LISTEN_PORT_ARG" ] && validate_port "$LISTEN_PORT_ARG"
+
 [ "$(id -u)" != "0" ] && err "必须以 root 运行" && exit 1
 
 detect_os(){
@@ -1458,8 +1677,15 @@ REALITY_PK=$(echo "$REALITY_KEYS" | grep "PrivateKey" | awk '{print $NF}' | tr -
 REALITY_PUB=$(echo "$REALITY_KEYS" | grep "PublicKey" | awk '{print $NF}' | tr -d '\r' || echo "")
 REALITY_SID=$(sing-box generate rand 8 --hex 2>/dev/null || echo "0123456789abcdef")
 
-read -p "请输入线路机监听端口(留空随机 20000-65000): " USER_PORT
-LISTEN_PORT="${USER_PORT:-$(shuf -i 20000-65000 -n 1 2>/dev/null || echo 20443)}"
+if [ -n "$LISTEN_PORT_ARG" ]; then
+    LISTEN_PORT="$LISTEN_PORT_ARG"
+elif $NON_INTERACTIVE; then
+    LISTEN_PORT="$(shuf -i 20000-65000 -n 1 2>/dev/null || echo 20443)"
+else
+    read -p "请输入线路机监听端口(留空随机 20000-65000): " USER_PORT
+    LISTEN_PORT="${USER_PORT:-$(shuf -i 20000-65000 -n 1 2>/dev/null || echo 20443)}"
+fi
+validate_port "$LISTEN_PORT"
 
 mkdir -p /etc/sing-box
 

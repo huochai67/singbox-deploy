@@ -14,6 +14,7 @@
 - ✅ **开机自启** - 自动配置 Systemd / OpenRC 开机自启，崩溃自动拉起服务端
 - ✅ **连接 IP** - 自动获取公网 IP 或手动输入 连接IP/DDNS域名 并生成客户端链接
 - ✅ **管理工具** - 输入 sb 指令进入管理界面查看节点链接、重置端口、服务端控制查看等功能
+- ✅ **无人值守** - 支持启动参数传入协议、端口、SNI、连接 IP 等配置，适合自动化部署
 
 ### 🔗 线路机功能
 
@@ -61,16 +62,51 @@
 
 ## ✅ 一键部署命令
 
-安装全功能 sing-box：
+交互安装 sing-box：
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/caigouzi121380/singbox-deploy/main/install-singbox-yyds.sh)"
 ```
 
+无人值守安装默认 SS：
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/caigouzi121380/singbox-deploy/main/install-singbox-yyds.sh)" -- --non-interactive --protocols ss
+```
+
+无人值守安装指定协议和端口：
+
+```bash
+bash install-singbox-yyds.sh --non-interactive --protocols ss,reality --ss-port 12345 --reality-port 443 --host example.com --reality-sni addons.mozilla.org
+```
+
 ## 📦 脚本说明
 
-- `install-singbox-yyds.sh`：主入口，支持多协议部署、`sb` 管理面板和线路机脚本生成。
-- `install-singbox.sh`：基础版，仅用于简单 Shadowsocks 部署场景。
+- `install-singbox-yyds.sh`：唯一主入口，支持多协议部署、无人值守运行、`sb` 管理面板和线路机脚本生成。
+
+## ⚙️ 启动参数
+
+常用参数：
+
+```bash
+--help                         显示帮助
+--non-interactive              无人值守运行，不等待输入
+-y, --yes                      自动确认默认确认项
+--protocols ss,hy2,tuic        协议列表，支持 ss/hy2/tuic/reality/anytls/all
+--node-name NAME               节点名称后缀
+--host HOST                    客户端连接 IP 或 DDNS 域名
+--reality-sni SNI              Reality SNI，默认 addons.mozilla.org
+--ss-method METHOD             SS 加密方式
+--ss-port PORT                 SS 端口
+--hy2-port PORT                HY2 端口
+--tuic-port PORT               TUIC 端口
+--reality-port PORT            VLESS Reality 端口
+--anytls-port PORT             AnyTLS Reality 端口
+--reinstall                    已安装 sing-box 时强制重装
+--skip-reinstall               已安装 sing-box 时跳过重装
+```
+
+`--non-interactive` 未指定协议时默认部署 `ss`；未指定端口时自动随机生成。
 
 ## 🔧 安装后管理
 
@@ -105,19 +141,19 @@ tail -f /var/log/sing-box.log
 语法检查：
 
 ```bash
-docker run --rm -v "$PWD:/work:ro" -w /work alpine:latest sh -c 'apk add --no-cache bash >/dev/null && bash -n install-singbox-yyds.sh && bash -n install-singbox.sh'
+docker run --rm -v "$PWD:/work:ro" -w /work alpine:latest sh -c 'apk add --no-cache bash >/dev/null && bash -n install-singbox-yyds.sh'
 ```
 
 在 Alpine 容器中实际跑一次最小 SS 部署：
 
 ```bash
-docker run --rm -i -v "$PWD:/work:ro" -w /work alpine:latest sh -c 'mkdir -p /run/openrc && touch /run/openrc/softlevel && apk add --no-cache bash >/dev/null && printf "\n1\n\n\n\n" | bash install-singbox-yyds.sh'
+docker run --rm -i -v "$PWD:/work:ro" -w /work alpine:latest sh -c 'mkdir -p /run/openrc && touch /run/openrc/softlevel && apk add --no-cache bash >/dev/null && bash install-singbox-yyds.sh --non-interactive --protocols ss'
 ```
 
 验证安装产物和 `sb` 面板：
 
 ```bash
-docker run --rm -i -v "$PWD:/work:ro" -w /work alpine:latest sh -c 'mkdir -p /run/openrc && touch /run/openrc/softlevel && apk add --no-cache bash >/dev/null && printf "\n1\n\n\n\n" | bash install-singbox-yyds.sh >/tmp/install.log && sing-box check -c /etc/sing-box/config.json && test -x /usr/local/bin/sb && printf "1\n0\n" | sb'
+docker run --rm -i -v "$PWD:/work:ro" -w /work alpine:latest sh -c 'mkdir -p /run/openrc && touch /run/openrc/softlevel && apk add --no-cache bash >/dev/null && bash install-singbox-yyds.sh --non-interactive --protocols ss >/tmp/install.log && sing-box check -c /etc/sing-box/config.json && test -x /usr/local/bin/sb && printf "1\n0\n" | sb'
 ```
 
 说明：Docker 容器不是完整 init 环境，OpenRC 可能输出 `hwdrivers`、`machine-id` 或 cgroup 相关警告；只要脚本最终提示部署完成、`sing-box check` 通过、`sb` 可生成链接，即表示容器验证通过。
