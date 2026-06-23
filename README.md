@@ -65,13 +65,13 @@
 交互安装 sing-box：
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/caigouzi121380/singbox-deploy/main/install-singbox-yyds.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/huochai67/singbox-deploy/main/install-singbox-yyds.sh)"
 ```
 
 无人值守安装默认 SS：
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/caigouzi121380/singbox-deploy/main/install-singbox-yyds.sh)" -- --non-interactive --protocols ss
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/huochai67/singbox-deploy/main/install-singbox-yyds.sh)" -- --non-interactive --protocols ss
 ```
 
 无人值守安装指定协议和端口：
